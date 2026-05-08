@@ -269,7 +269,69 @@ body {
 }
 #toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
 
-/* ── 勝利畫面 ── */
+/* ── 放大預覽 Modal ── */
+#zoom-modal {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(90,74,106,0.75); backdrop-filter: blur(8px);
+  display: none; align-items: center; justify-content: center;
+  padding: 20px;
+}
+#zoom-modal.show { display: flex; }
+#zoom-modal .zoom-box {
+  background: #fffdf9;
+  border-radius: 28px;
+  padding: 16px;
+  border: 5px solid white;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  max-width: 340px;
+  width: 100%;
+  text-align: center;
+}
+#zoom-modal img {
+  width: 100%; border-radius: 16px;
+  margin-bottom: 14px;
+}
+#zoom-modal .zoom-close {
+  background: linear-gradient(180deg, #c5e0f9, #8dbde8);
+  color: #2d5a8a; font-weight: 900;
+  border: none; border-radius: 16px;
+  padding: 12px 32px; font-size: 1.1rem;
+  box-shadow: 0 6px 0 #6a9dc8;
+  cursor: pointer; width: 100%;
+  font-family: 'Varela Round', 'Noto Sans TC', sans-serif;
+}
+#zoom-modal .zoom-close:active { box-shadow: 0 2px 0 #6a9dc8; transform: translateY(4px); }
+
+/* ── 答錯後「我看好了」按鈕 ── */
+#ready-btn {
+  position: fixed;
+  bottom: 100px; left: 50%;
+  transform: translateX(-50%);
+  z-index: 40;
+  background: linear-gradient(180deg, #fde9a2, #f9cc55);
+  color: #7a5500; font-weight: 900;
+  border: none; border-radius: 50px;
+  padding: 14px 36px; font-size: 1.15rem;
+  box-shadow: 0 8px 0 #d4a020;
+  cursor: pointer; display: none;
+  font-family: 'Varela Round', 'Noto Sans TC', sans-serif;
+  animation: readyPop 0.4s cubic-bezier(.34,1.56,.64,1);
+  white-space: nowrap;
+}
+#ready-btn:active { box-shadow: 0 2px 0 #d4a020; transform: translateX(-50%) translateY(6px); }
+@keyframes readyPop {
+  from { transform: translateX(-50%) scale(0.7); opacity: 0; }
+  to   { transform: translateX(-50%) scale(1);   opacity: 1; }
+}
+
+/* 翻開的卡片加放大提示 */
+.card-wrap.flipped .card-face.card-front-face::after {
+  content: '🔍';
+  position: absolute;
+  top: 4px; right: 6px;
+  font-size: 0.9rem;
+  opacity: 0.6;
+}
 #win-modal {
   position: fixed; inset: 0; z-index: 50; display: none;
   background: rgba(90,74,106,0.55); backdrop-filter: blur(8px);
@@ -501,6 +563,17 @@ body { padding-bottom: env(safe-area-inset-bottom, 16px); }
   </div>
 </div>
 
+<!-- 放大預覽 Modal -->
+<div id="zoom-modal">
+  <div class="zoom-box">
+    <img id="zoom-img" src="" alt="放大檢視">
+    <button class="zoom-close" onclick="closeZoom()">✅ 我數好了！</button>
+  </div>
+</div>
+
+<!-- 答錯後「我看好了」按鈕 -->
+<button id="ready-btn" onclick="onReadyAfterWrong()">👀 我看好了，蓋回去！</button>
+
 <!-- ======= 勝利畫面 ======= -->
 <div id="win-modal">
   <div class="win-box rounded-3xl p-8 md:p-10 text-center shadow-2xl border-4 border-white max-w-sm w-full mx-4" style="background:#fffdf9">
@@ -634,31 +707,52 @@ function genQuantity(emoji, count) {
   ctx.fillStyle = '#fff8f0';
   ctx.fillRect(0, 0, 300, 300);
 
-  // 依數量決定字體大小與每列數量
-  let fontSize, cols;
-  if (count <= 5)       { fontSize = 72; cols = 3; }
-  else if (count <= 9)  { fontSize = 58; cols = 3; }
-  else if (count <= 12) { fontSize = 50; cols = 4; }
-  else if (count <= 16) { fontSize = 44; cols = 4; }
-  else                  { fontSize = 38; cols = 5; }
-
+  // 格子排列：固定5列，滿5換行（類似10格計數板）
+  const cols = 5;
   const rows = Math.ceil(count / cols);
-  const padX = fontSize * 0.1;
-  const padY = fontSize * 0.1;
-  const cellW = (300 - padX * 2) / cols;
-  const cellH = (300 - padY * 2) / rows;
+  const totalRows = Math.max(rows, Math.ceil(20 / cols)); // 最多4行
 
-  ctx.font = `${fontSize}px Arial`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
+  const pad = 18;
+  const gap = 6;
+  const cellW = (300 - pad * 2 - gap * (cols - 1)) / cols;
+  const cellH = (300 - pad * 2 - gap * (totalRows - 1)) / totalRows;
+  const radius = 8;
 
-  for (let i = 0; i < count; i++) {
+  // 顏色：每5格一組，深淺交替
+  const colors = ['#f7a0b0', '#f0c060', '#80c8f0', '#90d890', '#c0a0e8'];
+
+  for (let i = 0; i < cols * totalRows; i++) {
     const col = i % cols;
     const row = Math.floor(i / cols);
-    const x = padX + cellW * col + cellW / 2;
-    const y = padY + cellH * row + cellH / 2 + fontSize * 0.1;
-    ctx.fillText(emoji, x, y);
+    const x = pad + col * (cellW + gap);
+    const y = pad + row * (cellH + gap);
+
+    if (i < count) {
+      // 填滿格子（有數量）
+      const color = colors[Math.floor(i / 5) % colors.length];
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.roundRect(x, y, cellW, cellH, radius);
+      ctx.fill();
+
+      // 格子內顯示 emoji（縮小）
+      const emojiSize = Math.min(cellW, cellH) * 0.7;
+      ctx.font = `${emojiSize}px Arial`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(emoji, x + cellW / 2, y + cellH / 2 + emojiSize * 0.08);
+    } else {
+      // 空格子（灰色虛線框）
+      ctx.strokeStyle = '#ddd';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.roundRect(x, y, cellW, cellH, radius);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
   }
+
   return c.toDataURL();
 }
 
@@ -891,6 +985,7 @@ function startGame() {
   document.getElementById('game-screen').classList.add('flex','flex-col');
   document.getElementById('win-modal').classList.remove('show');
 
+  document.getElementById('ready-btn').style.display = 'none';
   startTimer();
 
   updateScore();
@@ -955,9 +1050,16 @@ function renderZone(container, cards) {
 // 翻牌邏輯（嚴格引導：先A後B）
 // ======================================================
 function onCardClick(wrap) {
-  if (isLocked) return;
   if (wrap.classList.contains('matched')) return;
-  if (wrap.classList.contains('flipped')) return;
+
+  // 已翻開的牌：點擊就放大
+  if (wrap.classList.contains('flipped')) {
+    const img = wrap.querySelector('.card-front-face img');
+    if (img) openZoom(img.src);
+    return;
+  }
+
+  if (isLocked) return;
 
   ensureAudio();
   clearTimeout(hintTimeout);
@@ -1053,12 +1155,12 @@ function onMatch() {
 }
 
 // ======================================================
-// 配對錯誤
+// 配對錯誤（不自動蓋回，等孩子自己按）
 // ======================================================
 function onWrong() {
   playWrong();
   speak('wrong');
-  setBanner('💪 再試試看！', '');
+  setBanner('再看看！數一數再試試！', '');
 
   const cardA = flippedA;
   const cardB = flippedB;
@@ -1066,18 +1168,45 @@ function onWrong() {
   // 抖動動畫
   cardA.classList.add('wrong');
   cardB.classList.add('wrong');
-
   setTimeout(() => {
-    cardA.classList.remove('flipped', 'wrong');
-    cardB.classList.remove('flipped', 'wrong');
-    flippedA = null;
-    flippedB = null;
-    isLocked = false;
+    cardA.classList.remove('wrong');
+    cardB.classList.remove('wrong');
+  }, 500);
 
-    setPondHighlight('a');
-    setBanner('👆 先翻藍色數字池塘！', 'step-a');
-    scheduleHint();
-  }, 1200);
+  // 顯示「我看好了」按鈕，孩子自己決定何時蓋回
+  const btn = document.getElementById('ready-btn');
+  btn.style.display = 'block';
+  // isLocked 保持 true，防止繼續翻牌
+}
+
+function onReadyAfterWrong() {
+  const cardA = flippedA;
+  const cardB = flippedB;
+  if (!cardA || !cardB) return;
+
+  document.getElementById('ready-btn').style.display = 'none';
+
+  cardA.classList.remove('flipped');
+  cardB.classList.remove('flipped');
+  flippedA = null;
+  flippedB = null;
+  isLocked = false;
+
+  setPondHighlight('a');
+  setBanner('👆 先翻藍色數字池塘！', 'step-a');
+  scheduleHint();
+}
+
+// ======================================================
+// 放大預覽
+// ======================================================
+function openZoom(imgSrc) {
+  document.getElementById('zoom-img').src = imgSrc;
+  document.getElementById('zoom-modal').classList.add('show');
+}
+
+function closeZoom() {
+  document.getElementById('zoom-modal').classList.remove('show');
 }
 
 // ======================================================
